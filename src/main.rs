@@ -125,7 +125,7 @@ impl<'cfg> PackageInfo<'cfg> {
     }
 }
 
-fn get_checksum(package_set: &PackageSet, pkg_id: PackageId) -> String {
+fn _get_checksum(package_set: &PackageSet, pkg_id: PackageId) -> String {
     match package_set
         .get_one(pkg_id)
         .map(|pkg| pkg.summary().checksum())
@@ -177,7 +177,7 @@ fn main() {
     let Opt::Bitbake(opt) = Opt::from_args();
     let result = real_main(opt, &mut config);
     if let Err(e) = result {
-        cargo::exit_with_error(e, &mut *config.shell());
+        cargo::exit_with_error(e, &mut config.shell());
     }
 }
 
@@ -217,7 +217,7 @@ fn real_main(options: Args, config: &mut Config) -> CliResult {
 
     // Resolve all dependencies (generate or use Cargo.lock as necessary)
     let resolve = md.resolve()?;
-    let package_set = resolve.0;
+    // let package_set = resolve.0;
 
     // build the crate URIs
     let mut src_uri_extras = vec![];
@@ -232,11 +232,10 @@ fn real_main(options: Args, config: &mut Config) -> CliResult {
             } else if src_id.is_registry() {
                 // this package appears in a crate registry
                 Some(format!(
-                    "    crate://{}/{}/{}{} \\\n",
+                    "    crate://{}/{}/{} \\\n",
                     CRATES_IO_URL,
                     pkg.name(),
                     pkg.version(),
-                    get_checksum(&package_set, pkg)
                 ))
             } else if src_id.is_path() {
                 // we don't want to spit out path based
@@ -317,7 +316,7 @@ fn real_main(options: Args, config: &mut Config) -> CliResult {
             println!("No package.description set in your Cargo.toml, using package.name");
             package.name()
         },
-        |s| cargo::util::interning::InternedString::new(&s.trim().replace("\n", " \\\n")),
+        |s| cargo::util::interning::InternedString::new(&s.trim().replace('\n', " \\\n")),
     );
 
     // package homepage (or source code location)
@@ -412,14 +411,14 @@ fn real_main(options: Args, config: &mut Config) -> CliResult {
         file,
         include_str!("bitbake.template"),
         name = package.name(),
-        version = package.version(),
+        // version = package.version(),
         summary = summary,
         homepage = homepage,
         license = license,
-        lic_files = lic_files.join(""),
+        // lic_files = lic_files.join(""),
         src_uri = src_uris.join(""),
         src_uri_extras = src_uri_extras.join("\n"),
-        project_rel_dir = rel_dir.display(),
+        // project_rel_dir = rel_dir.display(),
         project_src_uri = project_repo.uri,
         project_src_rev = project_repo.rev,
         git_srcpv = git_srcpv,
