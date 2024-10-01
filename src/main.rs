@@ -24,8 +24,9 @@ use cargo::core::resolver::CliFeatures;
 use cargo::core::GitReference;
 use cargo::core::{Package, PackageId, PackageSet, Resolve, Workspace};
 use cargo::ops;
+use cargo::sources::SourceConfigMap;
 use cargo::util::{important_paths, CargoResult};
-use cargo::{CliResult, Config};
+use cargo::{CliResult, GlobalContext};
 use itertools::Itertools;
 use std::default::Default;
 use std::env;
@@ -41,22 +42,23 @@ mod license;
 const CRATES_IO_URL: &str = "crates.io";
 
 /// Represents the package we are trying to generate a recipe for
-struct PackageInfo<'cfg> {
-    cfg: &'cfg Config,
+struct PackageInfo<'ctx> {
+    context: &'ctx GlobalContext,
     current_manifest: PathBuf,
-    ws: Workspace<'cfg>,
+    ws: Workspace<'ctx>,
 }
 
-impl<'cfg> PackageInfo<'cfg> {
-    /// creates our package info from the config and the `manifest_path`,
+impl<'ctx> PackageInfo<'ctx> {
+    /// creates our package info from the global context and the `manifest_path`,
     /// which may not be provided
-    fn new(config: &Config, manifest_path: Option<String>) -> CargoResult<PackageInfo> {
-        let manifest_path = manifest_path.map_or_else(|| config.cwd().to_path_buf(), PathBuf::from);
+    fn new(context: &GlobalContext, manifest_path: Option<String>) -> CargoResult<PackageInfo> {
+        let manifest_path =
+            manifest_path.map_or_else(|| context.cwd().to_path_buf(), PathBuf::from);
         let root = important_paths::find_root_manifest_for_wd(&manifest_path)?;
         println!("manifest_path: {manifest_path:?}");
-        let ws = Workspace::new(&root, config)?;
+        let ws = Workspace::new(&root, context)?;
         Ok(PackageInfo {
-            cfg: config,
+            context,
             current_manifest: root,
             ws,
         })
@@ -69,20 +71,21 @@ impl<'cfg> PackageInfo<'cfg> {
 
     /// Generates a package registry by using the Cargo.lock or
     /// creating one as necessary
-    fn registry(&self) -> CargoResult<PackageRegistry<'cfg>> {
-        let mut registry = PackageRegistry::new(self.cfg)?;
+    fn registry(&self) -> CargoResult<PackageRegistry<'ctx>> {
+        let source_config = SourceConfigMap::new(self.context).unwrap();
+        let mut registry = PackageRegistry::new_with_source_config(self.context, source_config)?;
         let package = self.package()?;
         registry.add_sources(vec![package.package_id().source_id()])?;
         Ok(registry)
     }
 
     /// Resolve the packages necessary for the workspace
-    fn resolve(&self) -> CargoResult<(PackageSet<'cfg>, Resolve)> {
+    fn resolve(&self) -> CargoResult<(PackageSet<'ctx>, Resolve)> {
         // build up our registry
         let mut registry = self.registry()?;
 
         // resolve our dependencies
-        let (packages, resolve) = ops::resolve_ws(&self.ws)?;
+        let (packages, resolve) = ops::resolve_ws(&self.ws, false)?;
 
         // resolve with all features set so we ensure we get all of the depends downloaded
         let resolve = ops::resolve_with_previous(
@@ -99,7 +102,6 @@ impl<'cfg> PackageInfo<'cfg> {
             &[],
             /* warn? */
             true,
-            None,
         )?;
 
         Ok((packages, resolve))
@@ -173,16 +175,16 @@ enum Opt {
 }
 
 fn main() {
-    let mut config = Config::default().unwrap();
+    let mut context = GlobalContext::default().unwrap();
     let Opt::Bitbake(opt) = Opt::from_args();
-    let result = real_main(opt, &mut config);
+    let result = real_main(opt, &mut context);
     if let Err(e) = result {
-        cargo::exit_with_error(e, &mut config.shell());
+        cargo::exit_with_error(e, &mut context.shell());
     }
 }
 
-fn real_main(options: Args, config: &mut Config) -> CliResult {
-    config.configure(
+fn real_main(options: Args, context: &mut GlobalContext) -> CliResult {
+    context.configure(
         options.verbose as u32,
         options.quiet,
         /* color */
@@ -202,7 +204,7 @@ fn real_main(options: Args, config: &mut Config) -> CliResult {
     )?;
 
     // Build up data about the package we are attempting to generate a recipe for
-    let md = PackageInfo::new(config, None)?;
+    let md = PackageInfo::new(context, None)?;
 
     // Our current package
     let package = md.package()?;
@@ -369,7 +371,7 @@ fn real_main(options: Args, config: &mut Config) -> CliResult {
     let license = license.split('/').map(str::trim).join(" | ");
 
     // attempt to figure out the git repo for this project
-    let project_repo = git::ProjectRepo::new(config).unwrap_or_else(|e| {
+    let project_repo = git::ProjectRepo::new(context).unwrap_or_else(|e| {
         println!("{}", e);
         Default::default()
     });
